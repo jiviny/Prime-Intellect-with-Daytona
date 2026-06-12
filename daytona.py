@@ -63,6 +63,9 @@ class DaytonaConfig(BaseConfig):
     org-specific (300-600/min on self-serve tiers, higher or custom on dedicated
     plans), so the default takes the self-serve floor (300/min) — raise it to match
     your org, or disable it for orgs with custom limits."""
+    connection_pool_maxsize: int = 250
+    """Max connections in the SDK client's HTTP pool, per process (the SDK default).
+    Raise it for massive runs driving many parallel sandboxes from one process."""
 
 
 class DaytonaRuntime(Runtime):
@@ -99,7 +102,10 @@ class DaytonaRuntime(Runtime):
         gpu_type, gpu_count = parse_gpu(self.config.gpu)
         try:
             self._daytona = AsyncDaytona(
-                SDKConfig(target=self.config.region) if self.config.region else None
+                SDKConfig(
+                    target=self.config.region,
+                    connection_pool_maxsize=self.config.connection_pool_maxsize,
+                )
             )
             async with (
                 creation_limiter(self.config.creates_per_sec, "daytona-sandbox")

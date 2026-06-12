@@ -36,7 +36,9 @@ of the Modal runtime merged in
   `creation_limiter` (`creates_per_sec`, default 5/s — the self-serve floor of 300/min);
   Daytona's creation limits are org-specific (300–600/min on self-serve tiers, custom on
   dedicated plans), so raise the knob to match your org or disable it. Tunnel starts share
-  the runtimes' global `prime_tunnel` limiter.
+  the runtimes' global `prime_tunnel` limiter. The SDK client's HTTP connection pool is
+  also configurable (`connection_pool_maxsize`, default 250 — the SDK default) for runs
+  driving many parallel sandboxes from one process.
 - **Resources** — the Modal-units convention shared by all v1 runtimes, mapped to whole
   units; GPU specs split via `parse_gpu` (Daytona GPU sandboxes are ephemeral-only, set
   automatically).
