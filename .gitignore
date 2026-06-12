@@ -8,6 +8,7 @@ __pycache__/
 verifiers/
 
 # working notes and scratch files
+.gitignore
 *.md
 !README.md
 *.tex
@@ -18,3 +19,4 @@ probe_*.py
 *.out
 upstream_*.py
 *.diff
+*.txt
