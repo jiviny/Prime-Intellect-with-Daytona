@@ -36,8 +36,9 @@ class DaytonaConfig(BaseConfig):
     workdir: str = "/app"
     network_access: bool = True
     public: bool = False
-    """Publish the sandbox's preview ports without auth — required for `public_url`
-    (a private sandbox's preview link needs a token header callers won't have)."""
+    """Make the sandbox's preview ports publicly reachable without signing. Not needed
+    for `public_url`: on a private sandbox (the default) it mints a *signed* preview
+    URL scoped to the sandbox's lifetime instead."""
     region: str | None = None
     """Daytona target region, e.g. "us" or "eu" (None = the account default)."""
     timeout: int | Literal["auto"] = 21600
@@ -204,16 +205,23 @@ class DaytonaRuntime(Runtime):
     async def public_url(self, port: int) -> str | None:
         # Native preview links → a public HTTPS URL reachable from anywhere (incl.
         # another sandbox), so a tool in its own Daytona sandbox needs no host
-        # middleman/tunnel. Only an unauthenticated URL when the sandbox is public —
-        # a private sandbox's link needs a token header "anyone" won't have.
-        if not self.config.public:
-            raise ProgramError(
-                "daytona preview links on a private sandbox require a token header; "
-                "set `public = true` on the daytona runtime config to publish ports, "
-                "or use a host/docker tools.runtime instead."
-            )
+        # middleman/tunnel. A plain preview URL is only unauthenticated on a public
+        # sandbox, so on a private one (the default) mint a *signed* URL instead:
+        # same reachability, no token header, valid for the sandbox's own lifetime
+        # (signing caps at 24h — also the runtime's max lifetime, so the link never
+        # expires before the sandbox it points into).
+        timeout = (
+            _MAX_TIMEOUT_SECONDS
+            if self.config.timeout == "auto"
+            else self.config.timeout
+        )
         try:
-            preview = await self._sandbox.get_preview_link(port)
+            if self.config.public:
+                preview = await self._sandbox.get_preview_link(port)
+            else:
+                preview = await self._sandbox.create_signed_preview_url(
+                    port, expires_in_seconds=min(timeout, _MAX_TIMEOUT_SECONDS)
+                )
         except Exception as e:  # surface daytona's exposure constraints actionably
             raise ProgramError(
                 f"daytona port exposure failed (port {port}): {e}"

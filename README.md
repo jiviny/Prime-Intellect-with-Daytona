@@ -21,9 +21,11 @@ of the Modal runtime merged in
   recovers the contract's stdout/stderr split in-band: stderr is redirected to a file during
   the run, emitted after a unique marker, and partitioned locally, with the exit code
   preserved. One round-trip, no extra API calls.
-- **`public_url()`** — native Daytona preview links: a public HTTPS URL with no tunnel
-  process. `expose()` reaches host ports through `prime_tunnel`, same as the Modal and Prime
-  runtimes.
+- **`public_url()`** — native Daytona preview links, with no tunnel process. On a private
+  sandbox (the default) it mints a *signed* URL valid for the sandbox's own lifetime — which
+  is what keeps the colocated user-simulator path (driven from the host via `public_url`)
+  working without making ports world-readable; a `public` sandbox returns the plain URL.
+  `expose()` reaches host ports through `prime_tunnel`, same as the Modal and Prime runtimes.
 - **Lifetime backstop** — Daytona has no absolute-lifetime knob, so `timeout` maps to
   inactivity auto-stop plus delete-on-stop (`auto_delete_interval=0`, which is also what
   the SDK's `ephemeral` flag aliases to): a leaked sandbox still removes itself.
@@ -54,7 +56,9 @@ The patch is based on the `feat/nano-as-v1` line as of June 12, 2026; `-3` resol
 
 Exercised live against Daytona's `us` region across the full contract: provisioning,
 exec (split streams, exit codes, env, workdir), file IO, background processes, PEP 723
-`uv` scripts resolving dependencies in-sandbox, preview-link `public_url`, and teardown
-with server-side deletion confirmed — 17/17, re-run in full after each revision. Exec
-round-trips in ~0.2s; provisioning takes ~3s on a cached image (~13s on a cold registry
-pull); a preview URL is minted in under 0.1s with no tunnel process.
+`uv` scripts resolving dependencies in-sandbox, signed `public_url` on a private sandbox
+(content fetched from the host with no auth header; the unsigned URL correctly rejected
+without a token), and teardown with server-side deletion confirmed — 17/17, re-run in full
+after each revision. Exec round-trips in ~0.2s; provisioning takes ~3s on a cached image
+(~13s on a cold registry pull); a signed preview URL is minted in ~0.1s with no tunnel
+process.
