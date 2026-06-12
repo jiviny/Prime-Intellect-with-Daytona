@@ -57,13 +57,12 @@ class DaytonaConfig(BaseConfig):
     delete-on-stop ("ephemeral"), which the always-on `auto_delete_interval=0` covers."""
     disk: float = 5.0
     """Disk in GB."""
-    creates_per_sec: float | None = 10.0
+    creates_per_sec: float | None = 5.0
     """Pace sandbox creation to this many per second, enforced host-wide across every
     env-server worker process (None/<= 0 disables it). Daytona's creation limit is
     org-specific (300-600/min on self-serve tiers, higher or custom on dedicated
-    plans), so set this to match your org; the default matches the highest self-serve
-    tier (600/min) — smaller orgs hit their concurrent-vCPU quota long before this
-    rate, and orgs with custom limits can raise or disable it."""
+    plans), so the default takes the self-serve floor (300/min) — raise it to match
+    your org, or disable it for orgs with custom limits."""
 
 
 class DaytonaRuntime(Runtime):

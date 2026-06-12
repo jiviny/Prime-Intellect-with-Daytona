@@ -30,10 +30,10 @@ of the Modal runtime merged in
   inactivity auto-stop plus delete-on-stop (`auto_delete_interval=0`, which is also what
   the SDK's `ephemeral` flag aliases to): a leaked sandbox still removes itself.
 - **Rate limiting** — sandbox creation is paced host-wide via the shared
-  `creation_limiter` (`creates_per_sec`, default 10/s); Daytona's creation limits are
-  org-specific (300–600/min on self-serve tiers, custom on dedicated plans), so the knob
-  is set to match your org or disabled. Tunnel starts share the runtimes' global
-  `prime_tunnel` limiter.
+  `creation_limiter` (`creates_per_sec`, default 5/s — the self-serve floor of 300/min);
+  Daytona's creation limits are org-specific (300–600/min on self-serve tiers, custom on
+  dedicated plans), so raise the knob to match your org or disable it. Tunnel starts share
+  the runtimes' global `prime_tunnel` limiter.
 - **Resources** — the Modal-units convention shared by all v1 runtimes, mapped to whole
   units; GPU specs split via `parse_gpu` (Daytona GPU sandboxes are ephemeral-only, set
   automatically).

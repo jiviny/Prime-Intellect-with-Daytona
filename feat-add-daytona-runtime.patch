@@ -1,4 +1,4 @@
-From 13c82515d6fa1ac5cddac545dcff4fe47f8d3b80 Mon Sep 17 00:00:00 2001
+From a7dcb2380a21c122bc49e61351e0b4307e67d40f Mon Sep 17 00:00:00 2001
 From: jiviny <jivin25@gmail.com>
 Date: Fri, 12 Jun 2026 14:31:08 -0700
 Subject: [PATCH] feat: add daytona runtime
@@ -28,8 +28,8 @@ and server-side deletion after stop.
  pyproject.toml                    |   7 +
  uv.lock                           | 504 +++++++++++++++++++-----------
  verifiers/v1/runtimes/__init__.py |  13 +-
- verifiers/v1/runtimes/daytona.py  | 303 ++++++++++++++++++
- 4 files changed, 635 insertions(+), 192 deletions(-)
+ verifiers/v1/runtimes/daytona.py  | 302 ++++++++++++++++++
+ 4 files changed, 634 insertions(+), 192 deletions(-)
  create mode 100644 verifiers/v1/runtimes/daytona.py
 
 diff --git a/pyproject.toml b/pyproject.toml
@@ -799,10 +799,10 @@ index 3f18d8cd..ca68a3f4 100644
  ]
 diff --git a/verifiers/v1/runtimes/daytona.py b/verifiers/v1/runtimes/daytona.py
 new file mode 100644
-index 00000000..40c6b55a
+index 00000000..f3eafaef
 --- /dev/null
 +++ b/verifiers/v1/runtimes/daytona.py
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,302 @@
 +"""Remote Daytona sandbox runtime: run the program in a Daytona sandbox, server via tunnel.
 +
 +The program runs in a remote sandbox and reaches the host interception server over a
@@ -862,13 +862,12 @@ index 00000000..40c6b55a
 +    delete-on-stop ("ephemeral"), which the always-on `auto_delete_interval=0` covers."""
 +    disk: float = 5.0
 +    """Disk in GB."""
-+    creates_per_sec: float | None = 10.0
++    creates_per_sec: float | None = 5.0
 +    """Pace sandbox creation to this many per second, enforced host-wide across every
 +    env-server worker process (None/<= 0 disables it). Daytona's creation limit is
 +    org-specific (300-600/min on self-serve tiers, higher or custom on dedicated
-+    plans), so set this to match your org; the default matches the highest self-serve
-+    tier (600/min) — smaller orgs hit their concurrent-vCPU quota long before this
-+    rate, and orgs with custom limits can raise or disable it."""
++    plans), so the default takes the self-serve floor (300/min) — raise it to match
++    your org, or disable it for orgs with custom limits."""
 +
 +
 +class DaytonaRuntime(Runtime):
