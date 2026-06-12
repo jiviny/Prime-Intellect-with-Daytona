@@ -11,13 +11,13 @@ import logging
 import math
 import shlex
 import uuid
-from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic_config import BaseConfig
 
 from verifiers.v1.errors import ProgramError
 from verifiers.v1.runtimes.base import ProgramResult, Runtime, parse_gpu
+from verifiers.v1.runtimes.limiters import _TUNNEL_LIMITER, creation_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,17 @@ class DaytonaConfig(BaseConfig):
     memory: float = 2.0
     """Memory in GB."""
     gpu: str | None = None
-    """GPU spec, e.g. "H100" or "H100:2" (type[:count]); Daytona GPU sandboxes are
-    ephemeral-only, which `start` sets automatically."""
+    """GPU spec, e.g. "H100" or "H100:2" (type[:count]). Daytona GPU sandboxes must be
+    delete-on-stop ("ephemeral"), which the always-on `auto_delete_interval=0` covers."""
     disk: float = 5.0
     """Disk in GB."""
+    creates_per_sec: float | None = 10.0
+    """Pace sandbox creation to this many per second, enforced host-wide across every
+    env-server worker process (None/<= 0 disables it). Daytona's creation limit is
+    org-specific (300-600/min on self-serve tiers, higher or custom on dedicated
+    plans), so set this to match your org; the default matches the highest self-serve
+    tier (600/min) — smaller orgs hit their concurrent-vCPU quota long before this
+    rate, and orgs with custom limits can raise or disable it."""
 
 
 class DaytonaRuntime(Runtime):
@@ -90,39 +97,44 @@ class DaytonaRuntime(Runtime):
         # Map the resources onto Daytona's API (whole units, split GPU; memory/disk are
         # already GB). Auth comes from the environment (DAYTONA_API_KEY / DAYTONA_API_URL).
         gpu_type, gpu_count = parse_gpu(self.config.gpu)
-        ephemeral = gpu_count > 0  # daytona GPU sandboxes are ephemeral-only
         try:
             self._daytona = AsyncDaytona(
                 SDKConfig(target=self.config.region) if self.config.region else None
             )
-            self._sandbox = await self._daytona.create(
-                CreateSandboxFromImageParams(
-                    name=self.name,
-                    image=self.config.image,
-                    resources=Resources(
-                        cpu=math.ceil(self.config.cpu),
-                        memory=math.ceil(self.config.memory),
-                        disk=math.ceil(self.config.disk),
-                        gpu=gpu_count or None,
-                        gpu_type=GpuType(gpu_type) if gpu_type else None,
+            async with (
+                creation_limiter(self.config.creates_per_sec, "daytona-sandbox")
+                or contextlib.nullcontext()
+            ):
+                self._sandbox = await self._daytona.create(
+                    CreateSandboxFromImageParams(
+                        name=self.name,
+                        image=self.config.image,
+                        resources=Resources(
+                            cpu=math.ceil(self.config.cpu),
+                            memory=math.ceil(self.config.memory),
+                            disk=math.ceil(self.config.disk),
+                            gpu=gpu_count or None,
+                            gpu_type=GpuType(gpu_type) if gpu_type else None,
+                        ),
+                        public=self.config.public,
+                        network_block_all=not self.config.network_access,
+                        # The lifetime backstop: auto-stop after `timeout` of
+                        # inactivity, then delete rather than archive. (The SDK's
+                        # `ephemeral=True` is an alias for exactly this setting, so
+                        # no separate flag — and it covers GPU sandboxes, which must
+                        # be delete-on-stop.)
+                        auto_stop_interval=max(1, timeout // 60),
+                        auto_delete_interval=0,
                     ),
-                    public=self.config.public,
-                    network_block_all=not self.config.network_access,
-                    ephemeral=ephemeral,
-                    # The lifetime backstop: auto-stop after `timeout` of inactivity,
-                    # then delete rather than archive (ephemeral already deletes).
-                    auto_stop_interval=max(1, timeout // 60),
-                    auto_delete_interval=None if ephemeral else 0,
-                ),
-                timeout=_CREATE_TIMEOUT_SECONDS,
-            )
+                    timeout=_CREATE_TIMEOUT_SECONDS,
+                )
             self._sandbox_id = self._sandbox.id
             logger.info(
                 "daytona: sandbox %s up (image=%s)", self._sandbox_id, self.config.image
             )
-            await self._sandbox.process.exec(
-                f"mkdir -p {shlex.quote(self.config.workdir)}"
-            )
+            # fs.create_folder has `-p` semantics, is idempotent, and raises on a real
+            # failure (a shell mkdir's exit code would be silently ignored).
+            await self._sandbox.fs.create_folder(self.config.workdir, "755")
         except (
             Exception
         ) as e:  # provisioning failure is one rollout's problem, not the eval's
@@ -136,7 +148,10 @@ class DaytonaRuntime(Runtime):
 
         tunnel = Tunnel(local_port=port)
         try:
-            url = str(await tunnel.start()).rstrip("/")
+            async with (
+                _TUNNEL_LIMITER
+            ):  # shared prime_tunnel rate (512/min, runtime-independent)
+                url = str(await tunnel.start()).rstrip("/")
         except Exception as e:
             raise ProgramError(f"daytona tunnel failed (host port {port}): {e}") from e
         self._tunnels.append(tunnel)
@@ -221,17 +236,15 @@ class DaytonaRuntime(Runtime):
         return data
 
     async def write(self, path: str, data: bytes) -> None:
-        # The upload does NOT run in the workdir, so resolve a relative path against it
-        # and create the parent first — via `mkdir -p` (idempotent), since the fs API's
-        # folder creation rejects an existing directory.
+        # The upload does NOT run in the workdir (the fs API resolves relative paths
+        # against $HOME), so resolve a relative path against it explicitly; the upload
+        # itself creates any missing parent directories.
         target = (
             path
             if path.startswith("/")
             else f"{self.config.workdir.rstrip('/')}/{path}"
         )
-        parent = shlex.quote(str(PurePosixPath(target).parent))
         try:
-            await self._sandbox.process.exec(f"mkdir -p {parent}")
             await self._sandbox.fs.upload_file(data, target)
         except Exception as e:
             raise ProgramError(f"write {path!r}: {e}") from e
@@ -240,15 +253,16 @@ class DaytonaRuntime(Runtime):
         # Synchronous atexit backstop (the async client can't run once the loop is
         # gone): stop the already-sync tunnels and delete the sandbox via the sync
         # client, so the costly resource isn't left to its inactivity backstop.
-        # Idempotent — the async `stop` handles the normal path, and a second delete
-        # just 404s (suppressed).
+        # Keyed off `_sandbox_id`, which is never nulled — a `stop` cancelled
+        # mid-delete still gets cleaned here; a duplicate delete just 404s
+        # (suppressed).
         for tunnel in self._tunnels:
             with contextlib.suppress(Exception):
                 tunnel.sync_stop()
         self._tunnels = []
         self._daytona = None
-        sandbox, self._sandbox = self._sandbox, None
-        if sandbox is None or self._sandbox_id is None:
+        self._sandbox = None
+        if self._sandbox_id is None:
             return
         from daytona import Daytona
 
@@ -260,7 +274,8 @@ class DaytonaRuntime(Runtime):
         # Best-effort, idempotent teardown on the normal path: tunnels first, then the
         # sandbox (the costly resource) via the async API. Runs from the rollout's
         # `finally`, so it fires on success, error, and cancellation; `_daytona` is
-        # nulled as the idempotency guard (the atexit `cleanup` then no-ops).
+        # nulled as the idempotency guard, and if cancellation cuts the delete short,
+        # the atexit `cleanup` finishes it by id.
         for tunnel in self._tunnels:
             with contextlib.suppress(Exception):
                 tunnel.sync_stop()

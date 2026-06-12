@@ -12,6 +12,9 @@ verifiers/
 !README.md
 *.tex
 smoke_*.py
+probe_*.py
 *.aux
 *.log
 *.out
+upstream_*.py
+*.diff
