@@ -22,10 +22,13 @@ of the Modal runtime merged in
   the run, emitted after a unique marker, and partitioned locally, with the exit code
   preserved. One round-trip, no extra API calls.
 - **`public_url()`** — native Daytona preview links, with no tunnel process. On a private
-  sandbox (the default) it mints a *signed* URL valid for the sandbox's own lifetime — which
-  is what keeps the colocated user-simulator path (driven from the host via `public_url`)
-  working without making ports world-readable; a `public` sandbox returns the plain URL.
-  `expose()` reaches host ports through `prime_tunnel`, same as the Modal and Prime runtimes.
+  sandbox (the default) it mints a *signed* URL — which is what keeps the colocated
+  user-simulator path (driven from the host via `public_url`) working without making ports
+  world-readable. Signed for the 24h signing max unconditionally: the runtime's `timeout` is
+  an inactivity backstop, not an absolute lifetime, so a shorter signature could go stale
+  mid-rollout on an active sandbox; the link stops resolving when the sandbox is deleted
+  anyway. A `public` sandbox returns the plain URL. `expose()` reaches host ports through
+  `prime_tunnel`, same as the Modal and Prime runtimes.
 - **Lifetime backstop** — Daytona has no absolute-lifetime knob, so `timeout` maps to
   inactivity auto-stop plus delete-on-stop (`auto_delete_interval=0`, which is also what
   the SDK's `ephemeral` flag aliases to): a leaked sandbox still removes itself.

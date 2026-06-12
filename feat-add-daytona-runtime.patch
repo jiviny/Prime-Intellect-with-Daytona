@@ -1,4 +1,4 @@
-From a7dcb2380a21c122bc49e61351e0b4307e67d40f Mon Sep 17 00:00:00 2001
+From 46eeedbbf61a6b0e918fa8a8910d1880db5b22c4 Mon Sep 17 00:00:00 2001
 From: jiviny <jivin25@gmail.com>
 Date: Fri, 12 Jun 2026 14:31:08 -0700
 Subject: [PATCH] feat: add daytona runtime
@@ -28,8 +28,8 @@ and server-side deletion after stop.
  pyproject.toml                    |   7 +
  uv.lock                           | 504 +++++++++++++++++++-----------
  verifiers/v1/runtimes/__init__.py |  13 +-
- verifiers/v1/runtimes/daytona.py  | 302 ++++++++++++++++++
- 4 files changed, 634 insertions(+), 192 deletions(-)
+ verifiers/v1/runtimes/daytona.py  | 298 ++++++++++++++++++
+ 4 files changed, 630 insertions(+), 192 deletions(-)
  create mode 100644 verifiers/v1/runtimes/daytona.py
 
 diff --git a/pyproject.toml b/pyproject.toml
@@ -799,10 +799,10 @@ index 3f18d8cd..ca68a3f4 100644
  ]
 diff --git a/verifiers/v1/runtimes/daytona.py b/verifiers/v1/runtimes/daytona.py
 new file mode 100644
-index 00000000..f3eafaef
+index 00000000..08544b28
 --- /dev/null
 +++ b/verifiers/v1/runtimes/daytona.py
-@@ -0,0 +1,302 @@
+@@ -0,0 +1,298 @@
 +"""Remote Daytona sandbox runtime: run the program in a Daytona sandbox, server via tunnel.
 +
 +The program runs in a remote sandbox and reaches the host interception server over a
@@ -843,7 +843,7 @@ index 00000000..f3eafaef
 +    public: bool = False
 +    """Make the sandbox's preview ports publicly reachable without signing. Not needed
 +    for `public_url`: on a private sandbox (the default) it mints a *signed* preview
-+    URL scoped to the sandbox's lifetime instead."""
++    URL instead (valid for the 24h signing max; dead once the sandbox is deleted)."""
 +    region: str | None = None
 +    """Daytona target region, e.g. "us" or "eu" (None = the account default)."""
 +    timeout: int | Literal["auto"] = 21600
@@ -1011,20 +1011,16 @@ index 00000000..f3eafaef
 +        # another sandbox), so a tool in its own Daytona sandbox needs no host
 +        # middleman/tunnel. A plain preview URL is only unauthenticated on a public
 +        # sandbox, so on a private one (the default) mint a *signed* URL instead:
-+        # same reachability, no token header, valid for the sandbox's own lifetime
-+        # (signing caps at 24h — also the runtime's max lifetime, so the link never
-+        # expires before the sandbox it points into).
-+        timeout = (
-+            _MAX_TIMEOUT_SECONDS
-+            if self.config.timeout == "auto"
-+            else self.config.timeout
-+        )
++        # same reachability, no token header. Signed for the 24h signing max
++        # unconditionally — `timeout` is an inactivity backstop, so an active sandbox
++        # can legitimately outlive it and a shorter signature would go stale
++        # mid-rollout; the link stops resolving when the sandbox is deleted anyway.
 +        try:
 +            if self.config.public:
 +                preview = await self._sandbox.get_preview_link(port)
 +            else:
 +                preview = await self._sandbox.create_signed_preview_url(
-+                    port, expires_in_seconds=min(timeout, _MAX_TIMEOUT_SECONDS)
++                    port, expires_in_seconds=_MAX_TIMEOUT_SECONDS
 +                )
 +        except Exception as e:  # surface daytona's exposure constraints actionably
 +            raise ProgramError(
