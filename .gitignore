@@ -20,3 +20,5 @@ probe_*.py
 upstream_*.py
 *.diff
 *.txt
+*~
+*.un~
