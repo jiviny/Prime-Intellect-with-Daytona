@@ -1,0 +1,17 @@
+# local environments and secrets
+.venv*/
+__pycache__/
+*.pyc
+.env
+
+# the upstream clone lives alongside this repo, not inside it
+verifiers/
+
+# working notes and scratch files
+*.md
+!README.md
+*.tex
+smoke_*.py
+*.aux
+*.log
+*.out
